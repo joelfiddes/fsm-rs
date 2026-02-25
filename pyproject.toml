@@ -1,0 +1,34 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "fsm-rs"
+version = "0.1.0"
+description = "Rust port of Essery's FSM1 (Factorial Snow Model) with Python bindings"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [
+    { name = "Joel Fiddes" },
+]
+keywords = ["snow", "model", "cryosphere", "geoscience", "ensemble"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+]
+dependencies = [
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+examples = ["matplotlib>=3.5", "pandas>=1.5"]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "fsm_rs._fsm_rs"
+python-source = "python"

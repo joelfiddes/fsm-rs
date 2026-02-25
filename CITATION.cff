@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+title: "fsm-rs: Rust port of the Factorial Snow Model (FSM1)"
+message: "If you use this software, please cite both this port and the original FSM1 paper."
+type: software
+license: MIT
+repository-code: "https://github.com/joelfiddes/fsm-rs"
+authors:
+  - family-names: Fiddes
+    given-names: Joel
+    orcid: "https://orcid.org/0000-0003-2870-6972"
+keywords:
+  - snow model
+  - cryosphere
+  - ensemble
+  - data assimilation
+  - Rust
+  - PyO3
+references:
+  - type: article
+    title: "A factorial snowpack model (FSM 1.0)"
+    authors:
+      - family-names: Essery
+        given-names: Richard
+    journal: "Geoscientific Model Development"
+    volume: 8
+    start: 3867
+    end: 3876
+    year: 2015
+    doi: "10.5194/gmd-8-3867-2015"

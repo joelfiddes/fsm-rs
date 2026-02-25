@@ -6,9 +6,12 @@ range near Grenoble, France.  The forcing and observation data are from
 Richard Essery's FSM repository.
 
 Generates three plots in docs/:
-  1. comparison.png — SWE and snow depth time series (Rust vs observations)
-  2. scatter.png   — Scatter plot of Rust vs Fortran SWE (Col de Porte)
+  1. comparison.png  — SWE and snow depth: Fortran vs Rust vs observations
+  2. scatter.png     — Scatter: Rust vs Fortran (SWE + snow depth)
   3. performance.png — Timing bar chart (Fortran vs Rust)
+
+Requires the Fortran FSM1 output file (out_CdP_0506.txt) to be present
+in data/ for plots 1 and 2.  If absent, those plots fall back to Rust-only.
 """
 
 from __future__ import annotations
@@ -90,15 +93,47 @@ def load_obs(path: Path) -> dict:
     }
 
 
+def load_fortran_output(path: Path) -> dict | None:
+    """Parse Fortran FSM1 output file (out_CdP_0506.txt).
+
+    Columns: year month day albedo runoff snow_depth SWE Tsurf Tsoil2
+    Returns None if the file does not exist.
+    """
+    if not path.exists():
+        return None
+    raw = np.loadtxt(path)
+    dates = pd.to_datetime(
+        {
+            "year": raw[:, 0].astype(int),
+            "month": raw[:, 1].astype(int),
+            "day": raw[:, 2].astype(int),
+        }
+    )
+    return {
+        "dates": dates,
+        "albedo": raw[:, 3],
+        "runoff": raw[:, 4],
+        "snow_depth": raw[:, 5],
+        "swe": raw[:, 6],
+        "tsurf": raw[:, 7],
+        "tsoil2": raw[:, 8],
+    }
+
+
 # ─── Run model ────────────────────────────────────────────────────────────
 
 def run_cdp():
-    """Run Rust FSM1 on Col de Porte forcing."""
+    """Run Rust FSM1 on Col de Porte forcing and load Fortran output."""
     forcing = load_forcing(DATA / "met_CdP_0506.txt")
     obs = load_obs(DATA / "obs_CdP_0506.txt")
+    fortran = load_fortran_output(DATA / "out_CdP_0506.txt")
 
     print(f"Forcing: {forcing['n_time']} hourly timesteps")
     print(f"Observations: {len(obs['dates'])} daily values")
+    if fortran:
+        print(f"Fortran output: {len(fortran['dates'])} daily values")
+    else:
+        print("Fortran output: not found (scatter plot will be skipped)")
 
     # Run with nconfig=31 (all options on), hourly dt, daily averaging
     t0 = time.perf_counter()
@@ -118,32 +153,43 @@ def run_cdp():
     elapsed = time.perf_counter() - t0
     print(f"Rust FSM1: {elapsed*1000:.1f} ms for {forcing['n_time']} timesteps")
 
-    return forcing, obs, result, elapsed
+    return forcing, obs, fortran, result, elapsed
 
 
 # ─── Plot 1: Comparison with observations ──────────────────────────────
 
-def plot_comparison(obs, result, dates_daily):
-    """Two-panel time series: SWE and snow depth, Rust vs observations."""
-    fig, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
+def plot_comparison(obs, fortran, result, dates_daily):
+    """Two-panel time series: SWE and snow depth — Fortran vs Rust vs obs."""
+    fig, axes = plt.subplots(2, 1, figsize=(12, 7.5), sharex=True)
+
+    has_fortran = fortran is not None
 
     # SWE
     ax = axes[0]
-    ax.plot(dates_daily, result["swe"], color="#2563eb", linewidth=1.5,
-            label="fsm-rs (nconfig=31)")
     ax.plot(obs["dates"], obs["swe"], "o", color="#dc2626", markersize=2.5,
-            alpha=0.7, label="Observations (CdP)")
+            alpha=0.7, label="Observations", zorder=3)
+    if has_fortran:
+        ax.plot(fortran["dates"], fortran["swe"], color="#f59e0b", linewidth=1.8,
+                label="Fortran FSM1", zorder=2)
+    ax.plot(dates_daily, result["swe"], color="#2563eb", linewidth=1.8,
+            linestyle="--", label="fsm-rs (Rust)", zorder=2)
     ax.set_ylabel("SWE (kg/m²)")
     ax.legend(loc="upper left", framealpha=0.9)
-    ax.set_title("Col de Porte 2005–06 — fsm-rs vs Observations", fontsize=13, fontweight="bold")
+    title = "Col de Porte 2005–06 — Fortran FSM1 vs fsm-rs vs Observations"
+    if not has_fortran:
+        title = "Col de Porte 2005–06 — fsm-rs vs Observations"
+    ax.set_title(title, fontsize=13, fontweight="bold")
     ax.grid(True, alpha=0.3)
 
     # Snow depth
     ax = axes[1]
-    ax.plot(dates_daily, result["snow_depth"], color="#2563eb", linewidth=1.5,
-            label="fsm-rs (nconfig=31)")
     ax.plot(obs["dates"], obs["snow_depth"], "o", color="#dc2626", markersize=2.5,
-            alpha=0.7, label="Observations (CdP)")
+            alpha=0.7, label="Observations", zorder=3)
+    if has_fortran:
+        ax.plot(fortran["dates"], fortran["snow_depth"], color="#f59e0b",
+                linewidth=1.8, label="Fortran FSM1", zorder=2)
+    ax.plot(dates_daily, result["snow_depth"], color="#2563eb", linewidth=1.8,
+            linestyle="--", label="fsm-rs (Rust)", zorder=2)
     ax.set_ylabel("Snow depth (m)")
     ax.set_xlabel("Date")
     ax.legend(loc="upper left", framealpha=0.9)
@@ -161,37 +207,46 @@ def plot_comparison(obs, result, dates_daily):
 
 # ─── Plot 2: Scatter (Rust vs Fortran on CdP) ─────────────────────────
 
-def plot_scatter(result, obs, dates_daily):
-    """Scatter: Rust model SWE vs observed SWE (proxy for Fortran agreement)."""
-    # Align on dates
-    obs_df = pd.DataFrame({"date": obs["dates"], "swe_obs": obs["swe"]})
-    mod_df = pd.DataFrame({"date": dates_daily, "swe_mod": result["swe"]})
-    merged = pd.merge(obs_df, mod_df, on="date", how="inner").dropna()
+def plot_scatter(fortran, result):
+    """Two-panel scatter: Rust vs Fortran for SWE and snow depth."""
+    if fortran is None:
+        print("Skipping scatter plot (no Fortran output)")
+        return
 
-    fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-    ax.scatter(merged["swe_obs"], merged["swe_mod"], s=12, alpha=0.6,
-               color="#2563eb", edgecolors="none")
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.5))
 
-    # 1:1 line
-    lim = max(merged["swe_obs"].max(), merged["swe_mod"].max()) * 1.05
-    ax.plot([0, lim], [0, lim], "--", color="#6b7280", linewidth=1, label="1:1")
-    ax.set_xlim(0, lim)
-    ax.set_ylim(0, lim)
-    ax.set_aspect("equal")
+    for ax, var, unit, fmt in [
+        (axes[0], "swe", "kg/m²", ".2f"),
+        (axes[1], "snow_depth", "m", ".4f"),
+    ]:
+        fort_vals = fortran[var]
+        rust_vals = result[var]
+        ax.scatter(fort_vals, rust_vals, s=14, alpha=0.6,
+                   color="#2563eb", edgecolors="none")
 
-    # Stats
-    r2 = np.corrcoef(merged["swe_obs"], merged["swe_mod"])[0, 1] ** 2
-    rmse = np.sqrt(np.mean((merged["swe_obs"] - merged["swe_mod"]) ** 2))
-    ax.text(0.05, 0.92, f"R² = {r2:.3f}\nRMSE = {rmse:.1f} kg/m²",
-            transform=ax.transAxes, fontsize=11,
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
+        lim = max(fort_vals.max(), rust_vals.max()) * 1.05
+        ax.plot([0, lim], [0, lim], "--", color="#6b7280", linewidth=1, label="1:1")
+        ax.set_xlim(0, lim)
+        ax.set_ylim(0, lim)
+        ax.set_aspect("equal")
 
-    ax.set_xlabel("Observed SWE (kg/m²)")
-    ax.set_ylabel("fsm-rs SWE (kg/m²)")
-    ax.set_title("Col de Porte — fsm-rs vs Observations", fontsize=12, fontweight="bold")
-    ax.legend(loc="lower right")
-    ax.grid(True, alpha=0.3)
+        r2 = np.corrcoef(fort_vals, rust_vals)[0, 1] ** 2
+        rmse = np.sqrt(np.mean((fort_vals - rust_vals) ** 2))
+        ax.text(0.05, 0.92, f"R² = {r2:.6f}\nRMSE = {rmse:{fmt}} {unit}",
+                transform=ax.transAxes, fontsize=11,
+                bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
 
+        label = "SWE" if var == "swe" else "Snow depth"
+        ax.set_xlabel(f"Fortran FSM1 {label.lower()} ({unit})")
+        ax.set_ylabel(f"fsm-rs {label.lower()} ({unit})")
+        ax.set_title(label, fontsize=12, fontweight="bold")
+        ax.legend(loc="lower right")
+        ax.grid(True, alpha=0.3)
+
+    fig.suptitle(
+        "Col de Porte 2005\u201306 \u2014 Fortran FSM1 vs fsm-rs",
+        fontsize=13, fontweight="bold", y=1.01,
+    )
     plt.tight_layout()
     out = DOCS / "scatter.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
@@ -254,15 +309,15 @@ def main():
     print("=" * 60)
     print()
 
-    forcing, obs, result, elapsed = run_cdp()
+    forcing, obs, fortran, result, elapsed = run_cdp()
 
     # Daily dates for model output
     dates_daily = obs["dates"]  # 273 days
 
     print()
     print("Generating plots...")
-    plot_comparison(obs, result, dates_daily)
-    plot_scatter(result, obs, dates_daily)
+    plot_comparison(obs, fortran, result, dates_daily)
+    plot_scatter(fortran, result)
     plot_performance(elapsed)
 
     print()

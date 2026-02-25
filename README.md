@@ -74,10 +74,10 @@ python examples/col_de_porte.py
 
 This generates comparison plots in `docs/`:
 
-#### Model vs Observations
+#### Fortran vs Rust vs Observations
 ![Comparison](docs/comparison.png)
 
-#### Scatter: fsm-rs vs Observations
+#### Scatter: Rust vs Fortran (SWE + snow depth)
 ![Scatter](docs/scatter.png)
 
 ## Cross-validation results
